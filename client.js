@@ -53,6 +53,12 @@ window.__ModuleLoader__.load({
       dmRemove: 'Remove',
       dmAdd: 'Add a decision model',
       dmAddBuiltin: 'Add',
+      dmSwitchTo: 'Use',
+      dmInUseLabel: 'In use:',
+      dmNowUsing: 'now in use:',
+      dmAdded: 'added:',
+      dmRemoved: 'removed:',
+      dmNoEndpoint: 'no address yet',
       dmBuiltins: 'Quick setups',
       dmName: 'name',
       dmNamePlaceholder: 'for example jev',
@@ -168,6 +174,12 @@ window.__ModuleLoader__.load({
       dmRemove: '删除',
       dmAdd: '添加决策模型',
       dmAddBuiltin: '添加',
+      dmSwitchTo: '使用',
+      dmInUseLabel: '正在使用：',
+      dmNowUsing: '正在使用：',
+      dmAdded: '已添加：',
+      dmRemoved: '已删除：',
+      dmNoEndpoint: '尚未填写地址',
       dmBuiltins: '快速配置',
       dmName: '名称',
       dmNamePlaceholder: '例如 jev',
@@ -733,7 +745,11 @@ html[data-model-router-routing] [data-slot="conversation.input.model"]{display:n
       // Use another decision model from now on.
       async function useDecisionModel(id) {
         const ok = await postConfig({ decision: { activeId: id } })
-        if (ok) setEditingId(null)
+        if (ok) {
+          setEditingId(null)
+          const row = decisionModels.find((entry) => entry.id === id)
+          setNote(`${t('dmNowUsing')} ${row?.label || row?.model || id}`)
+        }
         return ok
       }
 
@@ -777,7 +793,10 @@ html[data-model-router-routing] [data-slot="conversation.input.model"]{display:n
           questions: preset.questions ?? null,
         })
         const ok = await postConfig({ decision: { models, activeId: id } })
-        if (ok) setEditingId(null)
+        if (ok) {
+          setEditingId(null)
+          setNote(`${t('dmAdded')} ${preset.label || preset.id}`)
+        }
         return ok
       }
 
@@ -787,7 +806,10 @@ html[data-model-router-routing] [data-slot="conversation.input.model"]{display:n
         const models = decisionModels.filter((entry) => entry.id !== id)
         const activeId = activeDecisionId === id ? (models[0]?.id ?? '') : activeDecisionId
         const ok = await postConfig({ decision: { models, activeId } })
-        if (ok) setEditingId(null)
+        if (ok) {
+          setEditingId(null)
+          setNote(`${t('dmRemoved')} ${id}`)
+        }
         return ok
       }
 
@@ -939,13 +961,24 @@ html[data-model-router-routing] [data-slot="conversation.input.model"]{display:n
 
       const builtinList = builtins.length === 0 ? null : h('div', { className: 'mr-dm-builtins', key: 'builtins' }, [
         h('div', { className: 'mr-group-hint' }, t('dmBuiltins')),
-        h('div', { className: 'mr-dm-builtin-row' }, builtins.map((preset) => h('button', {
-          key: preset.id,
-          type: 'button',
-          className: 'mr-btn mr-btn-sm',
-          disabled: busy,
-          onClick: () => addBuiltinDecisionModel(preset),
-        }, `${t('dmAddBuiltin')} ${preset.label}`))),
+        h('div', { className: 'mr-dm-builtin-row' }, builtins.map((preset) => {
+          const existing = decisionModels.find((entry) => entry.id === preset.id)
+          const isActive = existing?.id === activeDecisionId
+          return h('button', {
+            key: preset.id,
+            type: 'button',
+            className: `mr-btn mr-btn-sm${isActive ? ' is-on' : ''}`,
+            disabled: busy || isActive,
+            title: existing
+              ? `${existing.label || existing.id} · ${existing.endpoint || t('dmNoEndpoint')}`
+              : (preset.endpoint || t('dmNoEndpoint')),
+            onClick: () => addBuiltinDecisionModel(preset),
+          }, isActive
+            ? `${t('dmInUseLabel')} ${preset.label}`
+            : existing
+              ? `${t('dmSwitchTo')} ${preset.label}`
+              : `${t('dmAddBuiltin')} ${preset.label}`)
+        })),
       ])
 
       const decisionBody = h('div', { key: 'decision' }, [
