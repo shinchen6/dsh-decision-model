@@ -72,4 +72,4 @@ how much to trust the judge, the safety rails, the records, and the tests.
 
 ## License
 
-MIT
+Apache License 2.0 — see [LICENSE](LICENSE).

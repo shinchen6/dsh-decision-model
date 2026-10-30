@@ -34,7 +34,7 @@
     "type": "git",
     "url": "https://github.com/shinchen6/dsh-decision-model.git"
   },
-  "license": "MIT",
+  "license": "Apache-2.0",
   "keywords": [
     "dsh",
     "deepseek-harness",
