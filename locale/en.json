@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Model Router",
+    "description": "Chooses a model and reasoning effort for each turn and subagent from a configurable decision model plus local heuristics."
+  }
+}

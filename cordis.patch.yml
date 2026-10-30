@@ -1,0 +1,89 @@
+
+- insert:
+    - id: model-router
+      name: '@local/dsh-model-router-web'
+      config:
+        # off | observe | auto
+        # Starts off: the control in the composer decides when routing begins.
+        # observe records decisions without changing any request; auto applies
+        # them.
+        mode: 'off'
+        candidates:
+          - label: flash
+            provider: minimax-cn
+            model: MiniMax-M3.1-Flash
+            tier: fast
+            cost: 1
+            supportsTools: true
+            supportsImages: true
+          - label: m3
+            provider: minimax-cn
+            model: MiniMax-M3
+            tier: balanced
+            cost: 3
+            supportsTools: true
+            supportsImages: true
+          - label: deepseek
+            provider: deepseek-official
+            model: deepseek-flash
+            tier: deep
+            cost: 4
+            supportsTools: true
+            supportsImages: true
+        policy:
+          baselineTier: balanced
+          qualityFloor: fast
+          maxTier: deep
+          allowDowngrade: true
+          allowUpgrade: true
+          # max | safe | decision
+          decisionTrust: max
+          downgradeConfidence: 0.75
+          main: true
+          subagents: true
+          maxDepth: 2
+          escalateOnToolError: true
+          escalateOnRequestError: true
+          escalateTurns: 1
+          maxFastSteps: 8
+        # The thinking level is chosen automatically: the decision model's hint
+        # when it offers one, otherwise the model's own default. Pin one here
+        # (tier: effort) to override it.
+        effortByTier: {}
+        decision:
+          enabled: true
+          maxFailures: 3
+          cooldownMs: 60000
+          # The decision models that can be used. The panel can add more and
+          # switch between them; one of them is active at a time.
+          models:
+            - id: jev
+              label: jev
+              # systemone | openai | custom
+              protocol: systemone
+              # The endpoint of your decision service. It is empty on purpose:
+              # the panel's quick setup adds this profile, and you fill in the
+              # address of the service you can reach.
+              endpoint: ''
+              model: decision-model-preview
+              timeoutMs: 900
+              tierQuestion: tier
+              effortQuestion: effort
+              questions:
+                tier:
+                  type: choice
+                  criteria:
+                    fast: 'Simple, localized, low-risk work: a lookup, rename, formatting, small edit, single command, or summarizing one file.'
+                    balanced: 'Normal multi-step coding: implement a small feature, fix a bug with investigation, refactor one module, or write tests.'
+                    deep: 'Complex, ambiguous, cross-cutting, or high-risk work: architecture, distributed systems, unknown root cause, security review, large migration, or performance analysis.'
+                effort:
+                  type: choice
+                  criteria:
+                    low: 'Little or no deliberation is needed; the answer is known or the change is mechanical.'
+                    medium: 'Some reasoning is useful, but there is no long proof or design search.'
+                    high: 'Careful multi-step reasoning, planning, or verification is required.'
+          activeId: jev
+        notices: true
+        debug: false
+        # local | all | off
+        statusRoute: local
