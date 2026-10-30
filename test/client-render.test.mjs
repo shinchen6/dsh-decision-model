@@ -202,6 +202,10 @@ const STATUS = {
     heuristicTier: 'balanced',
     decisionVerdict: '{"answers":{"tier":{"choice":"balanced"}}}',
   }],
+  defaultDecisionQuestions: {
+    tier: { type: 'choice', criteria: { fast: 'lookup, rename, formatting', balanced: 'ordinary coding', deep: 'design, debugging, review' } },
+    effort: { type: 'choice', criteria: { low: 'no reasoning needed', medium: 'some reasoning', high: 'deep reasoning' } },
+  },
   builtinDecisionModels: [
     { id: 'jev', label: 'jev', endpoint: 'http://x', model: 'decision-model-preview', protocol: 'systemone', timeoutMs: 900, tierQuestion: 'tier', effortQuestion: 'effort' },
   ],
@@ -290,9 +294,16 @@ for (const mode of MODES) {
   render()
   for (const effect of hooks.effects) effect()
   for (let i = 0; i < 10; i += 1) await new Promise((resolve) => setTimeout(resolve, 0))
-  // Open the panel and the decision modal.
+  // Open the panel, the decision modal, and the profile editor. A state change
+  // is only visible on the next render, so render, run the effects they
+  // register, and render again before looking at the result.
   hooks.state[0] = true
   hooks.state[8] = true
+  hooks.state[10] = 'jev'
+  render()
+  hooks.effects.length = 0
+  render()
+  for (const effect of hooks.effects) effect()
   seen.length = 0
   render()
   const tree = seen.join(' ')
@@ -300,6 +311,31 @@ for (const mode of MODES) {
   if (!tree.includes('jev')) throw new Error('the configured decision model did not render')
   if (!tree.includes('mr-modal')) throw new Error('the decision modal itself did not render')
   if (!tree.includes('mr-dm-builtins')) throw new Error('the quick setups did not render')
+  // The settings tab switches models by name, without opening the modal.
+  if (!tree.includes('mr-select')) throw new Error('the decision model dropdown did not render')
+  // The criteria block shows the shared default instead of an empty box.
+  if (!tree.includes('mr-criteria-preview') && !tree.includes('mr-textarea')) {
+    throw new Error('the criteria block did not render')
+  }
+  // The component translates with its own dictionary, so the rendered text is
+  // the English string, not the key. A profile with its own criteria edits
+  // them; one that follows the shared default shows them read-only.
+  // The stub locale returns the key itself, so assert on the key.
+  if (!tree.includes('criteriaReset')) throw new Error('the custom-criteria toggle did not render')
+
+  // Switch the editor to the profile that carries no criteria of its own.
+  hooks.state[10] = 'other'
+  hooks.state[9] = null
+  render()
+  hooks.effects.length = 0
+  render()
+  for (const effect of hooks.effects) effect()
+  seen.length = 0
+  render()
+  const shared = seen.join(' ')
+  if (!shared.includes('mr-criteria-preview')) throw new Error('the shared criteria did not render read-only')
+  if (!shared.includes('criteriaCustomise')) throw new Error('the customise button did not render')
+  if (!shared.includes('design, debugging, review')) throw new Error('the shared criteria text did not render')
   console.log('the decision modal rendered with the model list')
 }
 

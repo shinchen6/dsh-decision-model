@@ -1160,7 +1160,9 @@ export function apply(ctx, rawConfig = {}) {
 
   function decisionBody(content, meta, profile) {
     const source = profile ?? activeDecisionModel()
-    const questions = source?.questions ?? config.decision.questions ?? DEFAULT_QUESTIONS
+    const questions = usableQuestions(source?.questions)
+      ?? usableQuestions(config.decision.questions)
+      ?? DEFAULT_QUESTIONS
     const state = {
       ...(config.decision.stateExtra ?? {}),
       content,
@@ -1419,7 +1421,7 @@ export function apply(ctx, rawConfig = {}) {
           timeoutMs: entry.timeoutMs,
           tierQuestion: entry.tierQuestion,
           effortQuestion: entry.effortQuestion,
-          ...(entry.questions ? { questions: entry.questions } : {}),
+          ...(usableQuestions(entry.questions) ? { questions: entry.questions } : {}),
         })),
         activeId: config.decision.activeId,
       },
@@ -1506,6 +1508,9 @@ export function apply(ctx, rawConfig = {}) {
         failures: circuitFor(config.decision.activeId).failures,
       },
       policy: config.policy,
+      // The judgement criteria every profile shares until it is given its own.
+      // The panel shows these, so a new decision model needs no typing.
+      defaultDecisionQuestions: DEFAULT_QUESTIONS,
       // The one-click decision model setups the panel offers.
       builtinDecisionModels: BUILTIN_DECISION_MODELS.map((entry) => ({
         id: entry.id,
@@ -1715,7 +1720,7 @@ export function apply(ctx, rawConfig = {}) {
           timeoutMs: entry.timeoutMs,
           tierQuestion: entry.tierQuestion,
           effortQuestion: entry.effortQuestion,
-          ...(entry.questions ? { questions: entry.questions } : {}),
+          ...(usableQuestions(entry.questions) ? { questions: entry.questions } : {}),
         })),
         activeId: config.decision.activeId,
       },
@@ -1915,7 +1920,7 @@ export function apply(ctx, rawConfig = {}) {
     return sendJson(res, 200, {
       elapsedMs: Date.now() - started,
       decision,
-      questions: config.decision.questions ?? DEFAULT_QUESTIONS,
+      questions: usableQuestions(config.decision.questions) ?? DEFAULT_QUESTIONS,
     })
   }
 
@@ -2185,6 +2190,22 @@ function normalizeEffort(value) {
   if (/(off|none|minimal|low|light)/.test(text)) return 'low'
   if (/(medium|moderate|mid|normal|balanced|default)/.test(text)) return 'medium'
   if (/(high|max|deep|heavy|expert)/.test(text)) return 'high'
+  return null
+}
+
+/** Criteria that actually say something, or null when they say nothing.
+ * An empty object is what a half-filled editor leaves behind; treating it as
+ * "no criteria" keeps the built-in standard in force instead of asking the
+ * judge to choose with no instructions.
+ * @param value candidate criteria.
+ * @returns the criteria, or null when it is empty.
+ */
+function usableQuestions(value) {
+  if (!value || typeof value !== 'object') return null
+  const tier = value.tier?.criteria
+  if (tier && typeof tier === 'object' && Object.keys(tier).length > 0) return value
+  const effort = value.effort?.criteria
+  if (effort && typeof effort === 'object' && Object.keys(effort).length > 0) return value
   return null
 }
 

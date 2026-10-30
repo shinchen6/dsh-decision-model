@@ -69,21 +69,3 @@
               timeoutMs: 900
               tierQuestion: tier
               effortQuestion: effort
-              questions:
-                tier:
-                  type: choice
-                  criteria:
-                    fast: 'Simple, localized, low-risk work: a lookup, rename, formatting, small edit, single command, or summarizing one file.'
-                    balanced: 'Normal multi-step coding: implement a small feature, fix a bug with investigation, refactor one module, or write tests.'
-                    deep: 'Complex, ambiguous, cross-cutting, or high-risk work: architecture, distributed systems, unknown root cause, security review, large migration, or performance analysis.'
-                effort:
-                  type: choice
-                  criteria:
-                    low: 'Little or no deliberation is needed; the answer is known or the change is mechanical.'
-                    medium: 'Some reasoning is useful, but there is no long proof or design search.'
-                    high: 'Careful multi-step reasoning, planning, or verification is required.'
-          activeId: jev
-        notices: true
-        debug: false
-        # local | all | off
-        statusRoute: local

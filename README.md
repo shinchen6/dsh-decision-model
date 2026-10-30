@@ -46,9 +46,13 @@ The bundle starts switched off, so nothing changes until you turn it on.
 2. Choose a working mode: **off**, **observe** (record the choices without
    applying them), or **auto**.
 3. Map each tier to a model under **设置 / Settings**.
-4. Click **配置 / Configure** beside the panel title to add a decision model.
+4. Add a decision model: click **配置 / Configure** beside the panel title.
    **快速配置 / Quick setups** adds a ready-made `jev` profile — fill in the
-   address of your own decision service, then edit it to match your setup.
+   address of your own decision service. The judgement criteria are built in
+   and shared by every decision model, so there is nothing else to write.
+
+   The decision model in use is a dropdown on the settings tab, so switching
+   does not need the configuration modal.
 
 A decision service answers a tier and an effort. The bundle talks to it in the
 `systemone` shape, or the plain OpenAI chat-completions shape:

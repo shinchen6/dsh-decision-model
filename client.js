@@ -72,6 +72,10 @@ window.__ModuleLoader__.load({
       effortQuestion: 'Effort question',
       criteria: 'What counts as each tier',
       criteriaHint: 'The text the judge reads to pick a tier.',
+      criteriaDefaultHint: 'Every decision model uses the standard criteria below.',
+      criteriaCustomise: 'Customise',
+      criteriaReset: 'Use the standard',
+      criteriaBuiltin: 'The standard criteria apply.',
       criteriaInvalid: 'That is not valid JSON.',
       scope: 'Applies to',
       main: 'Main chat',
@@ -193,6 +197,10 @@ window.__ModuleLoader__.load({
       effortQuestion: '思考问题名',
       criteria: '各档位的判定标准',
       criteriaHint: '决策模型据此判断难度。',
+      criteriaDefaultHint: '所有决策模型默认使用下面的统一标准。',
+      criteriaCustomise: '自定义',
+      criteriaReset: '用统一标准',
+      criteriaBuiltin: '使用统一判定标准。',
       criteriaInvalid: '这不是合法的 JSON。',
       scope: '作用范围',
       main: '主对话',
@@ -343,6 +351,8 @@ window.__ModuleLoader__.load({
 .mr-select{height:26px;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-size:12px;padding:0 6px;max-width:100%;flex:none}
 .mr-select-sm{height:24px;font-size:11px}
 .mr-input{height:26px;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-size:12px;padding:0 6px;width:100%;box-sizing:border-box}
+.mr-criteria-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.mr-criteria-preview{margin-top:4px;max-height:132px;overflow:auto;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;background:var(--dsw-alias-bg-layer-1);padding:6px 8px;font-size:10px;line-height:1.5;color:var(--dsw-alias-label-secondary)}
 .mr-textarea{width:100%;box-sizing:border-box;min-height:96px;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;padding:6px;resize:vertical}
 .mr-field{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:3px 0}
 .mr-field-label{font-size:11px;color:var(--dsw-alias-label-secondary);flex:none;width:84px}
@@ -507,7 +517,8 @@ html[data-model-router-routing] [data-slot="conversation.input.model"]{display:n
             timeoutMs: String(target.timeoutMs ?? 900),
             tierQuestion: target.tierQuestion ?? 'tier',
             effortQuestion: target.effortQuestion ?? 'effort',
-            criteria: JSON.stringify(target.questions ?? {}, null, 2),
+            useDefault: !hasCriteria(target.questions),
+            criteria: JSON.stringify(target.questions ?? defaultQuestions ?? {}, null, 2),
           }
         })
       }, [status, editingId])
@@ -693,9 +704,34 @@ html[data-model-router-routing] [data-slot="conversation.input.model"]{display:n
       const decisionModels = status?.config?.decision?.models ?? []
       const activeDecisionId = status?.config?.decision?.activeId ?? decisionModels[0]?.id ?? ''
       const builtins = status?.builtinDecisionModels ?? []
+      // The criteria a profile uses until it is given its own. The panel shows
+      // them and sends null, so a new decision model needs no typing.
+      const defaultQuestions = status?.defaultDecisionQuestions ?? null
+
+      // Criteria that carry no content mean "use the shared standard", so a
+      // profile saved from a half-filled editor is not treated as custom.
+      function hasCriteria(questions) {
+        if (!questions || typeof questions !== 'object') return false
+        const tier = questions.tier?.criteria
+        const effort = questions.effort?.criteria
+        return (tier && Object.keys(tier).length > 0) || (effort && Object.keys(effort).length > 0)
+      }
+
+      // The shared criteria, in a form a reader can check at a glance.
+      function summarizeQuestions(questions) {
+        if (!questions) return t('criteriaBuiltin')
+        const tier = questions.tier?.criteria ?? {}
+        const effort = questions.effort?.criteria ?? {}
+        return [
+          ...Object.keys(tier).map((key) => `${key}: ${tier[key]}`),
+          ...Object.keys(effort).map((key) => `${t('effort')} ${key}: ${effort[key]}`),
+        ]
+      }
 
       function draftQuestions() {
         if (!draft) return null
+        // Following the shared default: store no criteria of our own.
+        if (draft.useDefault) return null
         if (!draft.criteria.trim()) return null
         try {
           return JSON.parse(draft.criteria)
@@ -951,14 +987,6 @@ html[data-model-router-routing] [data-slot="conversation.input.model"]{display:n
         }))
 
       // The one-click setups the panel knows about.
-      const activeDecision = decisionModels.find((entry) => entry.id === activeDecisionId) ?? decisionModels[0] ?? null
-      const activeDecisionName = activeDecision
-        ? (activeDecision.label || activeDecision.model || activeDecision.id)
-        : t('dmNone')
-      const activeDecisionMeta = activeDecision
-        ? [activeDecision.model, activeDecision.endpoint].filter(Boolean).join(' · ')
-        : t('dmNone')
-
       const builtinList = builtins.length === 0 ? null : h('div', { className: 'mr-dm-builtins', key: 'builtins' }, [
         h('div', { className: 'mr-group-hint' }, t('dmBuiltins')),
         h('div', { className: 'mr-dm-builtin-row' }, builtins.map((preset) => {
@@ -1047,16 +1075,39 @@ html[data-model-router-routing] [data-slot="conversation.input.model"]{display:n
             onChange: (event) => setDraft({ ...draft, effortQuestion: event.target.value }),
           })),
           h('div', { key: 'criteria', className: 'mr-row', style: { display: 'block' } }, [
-            h('div', { className: 'mr-row-label' }, t('criteria')),
-            h('div', { className: 'mr-row-hint' }, t('criteriaHint')),
-            h('textarea', {
-              className: 'mr-textarea',
-              value: draft.criteria,
-              disabled: busy,
-              spellCheck: false,
-              style: { marginTop: '4px' },
-              onChange: (event) => setDraft({ ...draft, criteria: event.target.value }),
-            }),
+            h('div', { className: 'mr-criteria-head' }, [
+              h('span', { className: 'mr-row-label' }, t('criteria')),
+              h('button', {
+                key: 'toggle',
+                type: 'button',
+                className: 'mr-btn mr-btn-sm',
+                disabled: busy,
+                onClick: () => {
+                  if (draft.useDefault) {
+                    // Start from the shared default, so the textarea opens
+                    // with a working answer instead of an empty box.
+                    setDraft({
+                      ...draft,
+                      useDefault: false,
+                      criteria: JSON.stringify(defaultQuestions ?? {}, null, 2),
+                    })
+                  } else {
+                    setDraft({ ...draft, useDefault: true })
+                  }
+                },
+              }, draft.useDefault ? t('criteriaCustomise') : t('criteriaReset')),
+            ]),
+            h('div', { className: 'mr-row-hint' }, draft.useDefault ? t('criteriaDefaultHint') : t('criteriaHint')),
+            draft.useDefault
+              ? h('div', { className: 'mr-criteria-preview' }, summarizeQuestions(defaultQuestions))
+              : h('textarea', {
+                className: 'mr-textarea',
+                value: draft.criteria,
+                disabled: busy,
+                spellCheck: false,
+                style: { marginTop: '4px' },
+                onChange: (event) => setDraft({ ...draft, criteria: event.target.value }),
+              }),
           ]),
         ]) : null,
       ])
@@ -1145,10 +1196,18 @@ html[data-model-router-routing] [data-slot="conversation.input.model"]{display:n
             }),
           ]),
           group(t('decision'), t('decisionActiveHint'), [
-            h('div', { key: 'active', className: 'mr-dm-active' }, [
-              h('span', { className: 'mr-dm-active-name' }, activeDecisionName),
-              h('span', { className: 'mr-dm-active-meta' }, activeDecisionMeta),
-            ]),
+            // The name alone, and a dropdown that switches without opening the
+            // configuration modal.
+            h('select', {
+              key: 'active',
+              className: 'mr-select',
+              value: activeDecisionId,
+              disabled: busy || decisionModels.length === 0,
+              onChange: (event) => useDecisionModel(event.target.value),
+            }, decisionModels.map((entry) => h('option', {
+              key: entry.id,
+              value: entry.id,
+            }, entry.label || entry.model || entry.id))),
           ]),
           selectRow(t('trust'), cfg?.policy?.decisionTrust ?? 'max', [
             ['max', t('trustMax')],

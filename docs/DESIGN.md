@@ -76,12 +76,21 @@ decision:
       timeoutMs: 900
       tierQuestion: tier
       effortQuestion: effort
-      questions: { ... }
   activeId: jev
 ```
 
 Each entry is a complete profile. The panel's **配置 / Configure** modal lists
 them: pick a row to switch to it, edit it to change its fields, or remove it.
+The settings tab also offers them as a dropdown, so switching does not need the
+modal.
+
+**The judgement criteria are shared.** A profile that carries none uses the
+plugin's built-in standard, which the panel displays read-only; **自定义 /
+Customise** gives that one profile its own copy, and **用统一标准 / Use the
+standard** drops it again. Nothing has to be typed for a new profile to work.
+Criteria that say nothing — an empty or half-filled object — are treated as the
+standard, so a partially filled editor cannot leave the judge with no
+instructions.
 **快速配置 / Quick setups** adds a ready-made profile in one click. Every
 profile carries its own failure breaker, so one judge that stops answering
 does not silence the others.
