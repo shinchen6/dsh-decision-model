@@ -78,8 +78,14 @@ particular one.
 
 ## Documentation
 
-[docs/DESIGN.md](docs/DESIGN.md) covers the configuration in detail: the tiers,
-how much to trust the judge, the safety rails, the records, and the tests.
+- [docs/DESIGN.md](docs/DESIGN.md) — the configuration in detail: the tiers, how
+  much to trust the judge, the safety rails, the records, and the evidence the
+  rules are built on.
+- [docs/REVIEW-PASS.md](docs/REVIEW-PASS.md) — a design, not yet built, for
+  asking the decision model to review the answer rather than only the task.
+
+`node test/threshold-eval.mjs` measures what each `downgradeConfidence` value
+would actually do against your own decision model.
 
 ## License
 

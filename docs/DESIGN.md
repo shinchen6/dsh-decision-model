@@ -201,6 +201,34 @@ shows the observed percentiles beside the setting, which is the only way to pick
 it honestly — the same reason RouteLLM ships a `calibrate_threshold` tool rather
 than a default.
 
+### Measured on this decision model
+
+[`test/threshold-eval.mjs`](../test/threshold-eval.mjs) sends 48 tasks with a
+known "cheapest tier that still produces a usable answer" to the live decision
+endpoint and sweeps the threshold. Two runs reproduced the same result:
+
+| threshold | acted on | below the usable floor | harm rate |
+|---|---|---|---|
+| 0.00 | 46/46 | 4 | 9% |
+| 0.10 | 43/46 | 2 | 5% |
+| **0.20** | **38/46** | **0** | **0%** |
+| **0.30** | **36/46** | **0** | **0%** |
+| 0.75 (default) | 16/46 | 0 | 0% |
+
+Every harmful choice sat at a margin of 0.11 or below, and all four were tasks
+that read as small but needed work across files — which is also the failure mode
+keyword matching has. Two conclusions:
+
+- The margin **is** predictive here: acting on every answer costs 9% harm,
+  acting only above 0.20 costs none. That is the property a threshold needs.
+- The 0.75 default is not unsafe, it is inert: it acts on a third of the turns
+  it could safely act on.
+
+0.20–0.30 is the defensible band. 0.25 sits above the observed harm with room to
+spare. Re-run the script after changing the decision model, its criteria, or the
+candidate models, and treat the labels as one engineer's judgement rather than
+ground truth.
+
 ### What this deliberately does not do
 
 - **No post-hoc cascade** (run cheap, inspect the answer, re-run strong). No
@@ -381,6 +409,17 @@ because a `const` used before its declaration throws only when that branch
 runs — a syntax check passes, and the control silently disappears from the
 composer. When such a reference error hits, the renderer abandons the slot
 entry, so the control vanishes rather than showing an error.
+
+## Measuring, not guessing
+
+- `node test/client-render.test.mjs` renders the composer control and the
+  decision modal against a stub DOM, so a broken reference fails here instead of
+  blanking the control in a browser.
+- `node test/vision.test.mjs` checks that a turn carrying an image never lands on
+  a model that cannot read one.
+- `node test/threshold-eval.mjs` sends a labelled task set to the real decision
+  endpoint and reports what each `downgradeConfidence` would do. Add `--repeat N`
+  to average out judge noise; `--base <url>` to point at another host.
 
 ## Diagnostics
 
