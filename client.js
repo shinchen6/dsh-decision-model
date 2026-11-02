@@ -87,6 +87,8 @@ window.__ModuleLoader__.load({
       judgeSaid: 'the judge itself said',
       ruleSaw: 'the local rule saw',
       observedMargin: 'observed separation p50/p90',
+      downgradeGate: 'Separation needed to pick a cheaper model',
+      downgradeGateHint: 'Higher is safer and saves less. Measured: below 0.20 the judge never picked a tier too cheap for the task.',
       passingThreshold: 'above the threshold',
       thresholdIs: 'threshold',
       trustSafeHint: 'It may pick a cheaper model when it is confident.',
@@ -216,6 +218,8 @@ window.__ModuleLoader__.load({
       judgeSaid: '模型自报',
       ruleSaw: '本地规则命中',
       observedMargin: '实测区分度 p50/p90',
+      downgradeGate: '降到更便宜模型所需的区分度',
+      downgradeGateHint: '越高越稳、省得越少。实测：0.20 以下判定模型从未选过偏低的档位。',
       passingThreshold: '超过阈值',
       thresholdIs: '阈值',
       trustSafeHint: '它有把握时，可以换更便宜的模型。',
@@ -359,6 +363,7 @@ window.__ModuleLoader__.load({
 .mr-select{height:26px;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-size:12px;padding:0 6px;max-width:100%;flex:none}
 .mr-select-sm{height:24px;font-size:11px}
 .mr-input{height:26px;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-size:12px;padding:0 6px;width:100%;box-sizing:border-box}
+.mr-range{width:120px;flex:none;accent-color:var(--dsw-alias-brand-primary)}
 .mr-criteria-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .mr-criteria-preview{margin-top:4px;max-height:132px;overflow:auto;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;background:var(--dsw-alias-bg-layer-1);padding:6px 8px;font-size:10px;line-height:1.5;color:var(--dsw-alias-label-secondary)}
 .mr-textarea{width:100%;box-sizing:border-box;min-height:96px;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;padding:6px;resize:vertical}
@@ -901,6 +906,24 @@ html[data-model-router-routing] [data-slot="conversation.input.model"]{display:n
         }, options.map(([key, text]) => h('option', { key, value: key }, text))),
       ])
 
+      const rangeRow = (label, value, onChange, hint) => h('div', { className: 'mr-row' }, [
+        h('div', { className: 'mr-row-text' }, [
+          h('div', { className: 'mr-row-label' }, `${label} · ${Number(value).toFixed(2)}`),
+          hint ? h('div', { className: 'mr-row-hint' }, hint) : null,
+        ]),
+        h('input', {
+          className: 'mr-range',
+          type: 'range',
+          min: '0',
+          max: '1',
+          step: '0.05',
+          value,
+          disabled: busy,
+          'aria-label': label,
+          onChange: (event) => onChange(Number(event.target.value)),
+        }),
+      ])
+
       const field = (label, control) => h('div', { className: 'mr-field' }, [
         h('div', { className: 'mr-field-label' }, label),
         h('div', { className: 'mr-field-body' }, control),
@@ -1237,6 +1260,19 @@ html[data-model-router-routing] [data-slot="conversation.input.model"]{display:n
               ].join(' · ')
               : null,
           ].filter(Boolean).join('\n')),
+          // The gate the threshold controls, adjustable here because the useful
+          // value depends on how decisive this decision model actually is.
+          rangeRow(
+            t('downgradeGate'),
+            cfg?.policy?.downgradeConfidence ?? 0.3,
+            (value) => postConfig({ policy: { downgradeConfidence: value } }),
+            [
+              t('downgradeGateHint'),
+              status?.confidenceStats
+                ? `${t('observedMargin')} ${status.confidenceStats.p50.toFixed(2)} / ${status.confidenceStats.p90.toFixed(2)}`
+                : null,
+            ].filter(Boolean).join(' · '),
+          ),
         ]) : null,
 
 

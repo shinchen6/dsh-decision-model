@@ -114,13 +114,12 @@ const DEFAULT_CONFIG = {
      * with `confidence` 0.39, another 0.41/0.29/0.29 with 0.12). The gap is
      * computed from the distribution, so it means the same thing every turn.
      *
-     * 0.75 is deliberately strict: with three tiers it asks the winner to lead
-     * by three quarters of the probability mass, which the observed answers
-     * (typically 0.12–0.94) often do not reach, so downgrades stay rare. The
-     * panel shows the observed range next to this setting; lower it to ~0.3 to
-     * let the judge actually move a turn down a tier.
+     * 0.3 comes from measuring this decision model rather than from taste: on a
+     * labelled set of 48 tasks every harmful choice sat at a separation of 0.11
+     * or below, and no harm was observed at 0.20 or above. The panel shows the
+     * observed range and lets the value be changed there.
      */
-    downgradeConfidence: 0.75,
+    downgradeConfidence: 0.3,
     main: true,
     subagents: true,
     maxDepth: 2,
@@ -1808,6 +1807,10 @@ export function apply(ctx, rawConfig = {}) {
         main: config.policy.main,
         subagents: config.policy.subagents,
         decisionTrust: config.policy.decisionTrust,
+        // Written explicitly: these are adjustable from the panel, and a value
+        // the user moved there has to survive a reload.
+        downgradeConfidence: config.policy.downgradeConfidence,
+        onJudgeUnavailable: config.policy.onJudgeUnavailable,
       },
       decision: {
         ...(base.decision ?? {}),

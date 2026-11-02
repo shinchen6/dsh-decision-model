@@ -313,6 +313,8 @@ for (const mode of MODES) {
   if (!tree.includes('mr-dm-builtins')) throw new Error('the quick setups did not render')
   // The settings tab switches models by name, without opening the modal.
   if (!tree.includes('mr-select')) throw new Error('the decision model dropdown did not render')
+  // The downgrade gate is adjustable from the panel, not only from config.
+  if (!tree.includes('mr-range')) throw new Error('the threshold slider did not render')
   // The criteria block shows the shared default instead of an empty box.
   if (!tree.includes('mr-criteria-preview') && !tree.includes('mr-textarea')) {
     throw new Error('the criteria block did not render')
