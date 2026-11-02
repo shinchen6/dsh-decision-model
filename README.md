@@ -82,7 +82,10 @@ particular one.
   much to trust the judge, the safety rails, the records, and the evidence the
   rules are built on.
 - [docs/REVIEW-PASS.md](docs/REVIEW-PASS.md) — a design, not yet built, for
-  asking the decision model to review the answer rather than only the task.
+  asking the decision model to review the answer rather than only the task, and
+  where in the agent loop each part would run.
+- [docs/TOOL-SELECTION.md](docs/TOOL-SELECTION.md) — why the same judge should
+  *not* pick which tools a turn can see, with the numbers behind that call.
 
 `node test/threshold-eval.mjs` measures what each `downgradeConfidence` value
 would actually do against your own decision model.

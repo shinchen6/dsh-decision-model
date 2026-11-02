@@ -56,87 +56,106 @@ and a cool-down, and never treats a failed forecast as evidence the task was
 easy. Those rules exist because a single noisy signal wastes money and makes the
 route oscillate.
 
-## Three things this could be, cheapest first
+## Where each piece sits in the agent loop
 
-### 1. A reviewer tool the agent can call (recommended first)
-
-A tool, not a routing change. The agent decides when it wants a second opinion.
-
-```
-critique(text, question?) -> {
-  verdict: "ok" | "defect",
-  kind?: "missing_requirement" | "wrong_fact" | "incomplete" | "contradiction" | "unsound",
-  confidence: number,
-  notes: string,          // one or two sentences, clipped
-}
-```
-
-- **Cost:** one judge call, ~250 ms, on demand. No behaviour change when unused.
-- **Risk:** low. It cannot damage a turn, because an agent that ignores it loses
-  nothing.
-- **Why it fits the request:** "review this", "评估一下", "is this correct" are
-  the tasks where a fast second reader is most useful, and the agent knows when
-  it is doing one.
-- **Open question:** whether a small judge reads enough context to be useful on
-  a large diff. The judge currently sees a 6000-character task clip and a tiny
-  activity digest; a tool call would need explicit text from the agent.
-
-This is the smallest thing that uses the judge's strength, and it produces the
-labelled data the later phases need.
-
-### 2. Substantive pre-routing for evaluation turns
-
-When the turn *is* a review, ask a substantive question instead of a difficulty
-question:
+This harness runs a turn like this, and the plugin already listens at four of
+these points:
 
 ```
-questions: {
-  severity: { type: "choice", criteria: {
-    none:  "The artifact has no problem that needs a code change.",
-    minor: "Problems exist but are cosmetic or local.",
-    major: "The artifact has a problem that requires a change across more than one place.",
-  }},
-  tier: { ...the usual tier question... }
-}
+user message
+  �agent/inbox/claimed          ← plugin: turn bookkeeping
+system prompt assembled
+  system-prompt/assemble        ← plugin: describes the routing state
+each step of the turn
+  agent/pre-step                ← plugin: asks the judge (today: difficulty only)
+  agent/request                 ← plugin: swaps provider/model
+model replies
+  session/event
+    'assistant/message'         ← plugin: already counts tokens here
+  ├─ has tool calls → run tools → next step
+  └─ no tool calls → turn ends
 ```
 
-- `major` → the turn will need careful fixing after the review, so route `deep`
-  regardless of how easy the question reads.
-- `none` → the review can run on a cheaper tier.
+Against that, the three ideas land in three different places, at three
+different costs.
 
-**This needs something the plugin does not have: the artifact.** The engine sends
-a compressed digest, not the diff or file under review. So this phase requires an
-*artifact selection* step — pick what to include, bounded at some character
-budget, from what the turn actually references. That is the real work, and it is
-why this is phase two rather than phase one.
+### ② Asking a substantive question — free, same call, same place
 
-### 3. Verify the finished answer, and escalate
+**Where:** inside `agent/pre-step`, exactly where the judge is asked today.
 
-The cascade the plugin does not have:
+There is no new round trip. The plugin already sends one request to the
+decision model per turn. This changes *which question that request carries*,
+when the turn looks like a review:
 
 ```
-after the assistant message:
-  ask -> { verdict: ok|defect, kind, confidence }
-  if defect and margin >= review.verify.minMargin:
-    count it; a second consecutive defect of the same kind acts
+today:   { tier: <fast|balanced|deep>, effort: <low|medium|high> }
+proposed:{ severity: <none|minor|major>, tier: ..., effort: ... }
 ```
 
-What "act" can mean, in increasing ambition:
+**What the user sees:** nothing new. The turn simply gets a tier that accounts
+for "there is a real defect in here, so the answer will need work".
 
-| Action | Behaviour | Cost | Risk |
-|---|---|---|---|
-| `report` | record it, and tell the panel; no route change | 1 judge call | lowest |
-| `escalate-rest` | raise the tier for the remaining steps of this turn | 1 judge call | low |
-| `retry` | re-answer the turn on a stronger model | 2x the turn | highest, needs harness support |
+**What it costs:** nothing. Same call, same 250 ms.
 
-`escalate-rest` is the honest default for a multi-step turn: it fixes the rest of
-the work without pretending the finished answer can be un-said. `retry` needs the
-Harness to re-issue a turn, which this plugin has not verified it can do; until
-that is established, `retry` is out of scope.
+**What it needs:** the artifact under review must reach the judge. Today the
+judge gets the user's words (6000 characters) plus a small digest of recent
+activity — not the diff or the file. Extracting it is the actual work in this
+option, and is why it is not first.
 
-Note what verification cannot do: on a single-step turn it arrives after the
-work is done, so its value is concentrated in agentic turns with many steps —
-which is exactly where a cascade pays off.
+### ① A review tool — one extra tool call, entirely under the model's control
+
+**Where:** the tool registry (`ctx.tools.register`). The tool becomes visible
+to the model like `bash` or `read_file`.
+
+**When it fires:** mid-turn, when the model decides to call it. The model writes
+a `critique(text)` call, the tool runs one judge request, and the verdict comes
+back as a normal tool result on the next step.
+
+**What the user sees:** a tool call in the transcript, indistinguishable in
+shape from any other.
+
+**What it costs:** one judge call *per use*, and only when the model asks. An
+agent that never calls it costs nothing.
+
+This is the smallest change: no routing logic, no new failure path, no new
+timing. It is also the one that produces the labelled data the other two need.
+
+### ③ Verifying the answer — the interesting one, and not a re-run
+
+**Where:** `session/event` → `assistant/message`, which the plugin already
+listens to for token accounting. When a message arrives **with no tool calls**,
+the turn is about to end, and that is the moment to ask the judge about it.
+
+**How it acts — and this is the part worth being precise about.** Verifying
+after the fact is useless if the only response is "too late". The harness has
+`agent.inject(message)`, which queues model-facing context for the next step.
+So instead of re-running the turn:
+
+```
+answer arrives with no tool calls
+  → judge: { verdict: defect, kind: incomplete, margin: 0.72 }
+  → inject a note: "A reviewer flagged this answer as incomplete: <kind>.
+                   Address it, or state why it is already answered."
+  → the turn continues for one more step, on the same or a stronger model
+  → bounded by review.maxReviews (default 1)
+```
+
+**What the user sees:** the answer, then a short visible note that a review pass
+ran, then the corrected answer. No duplicate work, no second copy of the turn.
+
+**What it costs:** one judge call per completed turn, plus one extra model step
+only when a defect is found.
+
+**Why this is the design to aim at:** it closes the "no cascade" gap without
+needing the harness to re-issue a turn, which is the blocker that made `retry`
+look expensive. The escalation happens by continuing, which the loop already
+supports.
+
+**Three things to check before trusting it:** whether `inject` lands before the
+turn is torn down on a single-step turn (it claims at the *next* step
+boundary, so a turn with no further steps may never read it); whether a
+self-injected review note can make a model loop; and whether the note itself
+becomes part of the transcript in a way the user finds noisy.
 
 ## Configuration
 
