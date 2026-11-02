@@ -104,8 +104,9 @@ Two inputs produce the desired tier:
   image presence, recent tool errors, recent request errors, estimated tokens).
 - **The decision model** classifies the same task. Its answer can raise the
   tier; with `policy.decisionTrust: max` (the default) it cannot lower it.
-  `safe` allows a measured downgrade when confidence is high; `decision` lets
-  the model decide outright.
+  `safe` allows a measured downgrade when the gap between the judge's first and
+  second choice clears `policy.downgradeConfidence`; `decision` lets the model
+  decide outright.
 
 The built-in `systemone` protocol matches this deployment's endpoint:
 
@@ -140,6 +141,84 @@ effect on the request: heuristics alone then choose the tier.
 The decision endpoint receives a bounded task digest: the first text block of
 the current user request plus short recent-activity snippets. Set
 `decision.enabled: false` to keep routing entirely local (heuristics only).
+
+## Why the local rule is shaped the way it is
+
+The keyword rule is deliberately limited, and the limits come from published
+evidence rather than taste.
+
+**A cheap local classifier is a normal design, not a compromise.** LiteLLM
+ships a keyword/pattern scorer as its *default* router classifier, with seven
+weighted dimensions (`codePresence`, `reasoningMarkers`, `technicalTerms`,
+`tokenCount`, …) and tier boundaries at 0.15 / 0.35 / 0.60, and reports it makes
+no classifier LLM call at all. A local rule costs nothing, adds no latency, and
+keeps the prompt on the machine.
+
+**But a router of this class barely beats the obvious baseline.** RouterBench
+(Hu et al., arXiv:2403.12031) measures seven routing algorithms across seven
+tasks and finds: "none of the routing algorithms significantly outperform the
+baseline Zero router" — where the Zero router is a cost-optimal random mix over
+the models' quality/cost hull. Learned routers with real training data
+(AutoMix, arXiv:2310.12963) reduce cost by 50%+; a keyword list is not that.
+So the local rule here is treated as a *cheap signal*, not an oracle.
+
+**Predicting up front needs data we do not have.** RouteLLM (Ong et al.,
+arXiv:2406.18665) trains binary win-prediction routers on preference data and
+reports that high-capacity routers "perform close to random" without in-domain
+labels — BERT scored an APGR of 0.391 against a random baseline of 0.500, i.e.
+*worse than random*. Adding ~1500 in-domain samples flipped it to 0.572. This
+plugin ships no training data, so it does not pretend to be a trained router.
+
+**Cascades need a reliable verifier, and we have one for free.** FrugalGPT
+(Chen, Zaharia, Zou, arXiv:2305.05176) is a cascade: a cheap scoring function
+accepts or defers each answer against a per-model threshold. RouterBench
+simulates the same design and finds the cascade "quickly approximates the
+performance of the Oracle" at zero verifier error, but degrades "rapidly" once
+the verifier errs more than 20% of the time. A tool call that returned an error
+is close to a zero-error verifier, which is why tool-error escalation is the one
+cascade trigger this plugin trusts — and why it is deliberately narrow.
+
+**What the rule is therefore allowed to do:** supply facts the judge cannot see
+(token estimate, image presence, subagent depth, step count) and escalate on
+unambiguous failure. It is not allowed to *lower* a tier on the strength of
+keywords while the judge is unavailable, because a missing forecast is not
+evidence that the task is easy. NVIDIA's Switchyard documents the same
+asymmetry: when its judge times out, errors, or returns an unparseable verdict,
+it routes to the *capable* tier and names `judge_failure`.
+
+**The judge is not told what the local rule concluded.** Switchyard's judge
+deliberately never sees candidate prices, provider names, or tool definitions.
+An LLM asked to agree or disagree with a stated prior tends to agree with it,
+which would make the second opinion worthless. The judge receives the task, a
+compressed activity digest, and factual metadata only.
+
+**The downgrade threshold is a measurement, not a constant to trust.**
+`policy.downgradeConfidence` is compared against the gap between the judge's
+first and second choice. The judge's own `confidence` field is not used for this
+because it does not track its own probabilities (0.59/0.32/0.09 reported 0.39,
+while 0.41/0.29/0.29 reported 0.12). Both numbers are recorded, and the panel
+shows the observed percentiles beside the setting, which is the only way to pick
+it honestly — the same reason RouteLLM ships a `calibrate_threshold` tool rather
+than a default.
+
+### What this deliberately does not do
+
+- **No post-hoc cascade** (run cheap, inspect the answer, re-run strong). No
+  documented commercial router ships this except NeMo Switchyard's `escalation`
+  mode, which needs a session id, buffers each reply, and requires two
+  consecutive fresh-evidence verdicts before latching. Re-running a completed
+  turn is a much larger change than this plugin makes today.
+- **No answer-quality verifier.** Scoring a free-text answer reliably is the
+  hard part of a cascade, and a bad verifier is worse than none: RouterBench
+  shows the cascade collapsing past a 20% verifier error rate.
+- **No trained classifier.** It would need labelled in-domain data that this
+  project does not collect.
+
+### Known gap worth stating
+
+Truncation (`finish_reason=length`) and empty or suspiciously short output are
+not used as escalation triggers. No commercial router documented in this
+research uses them either, so this is an open area rather than an oversight.
 
 ## Who decides
 
@@ -187,6 +266,8 @@ The full default lives in `cordis.patch.yml`. The important switches:
 | `policy.maxFastSteps` | `8` | Raise a fast route after this many steps in one turn |
 | `policy.subagentMaxTier` | `""` | Per-subagent ceiling; empty follows `maxTier` |
 | `policy.decisionTrust` | `max` | `max`, `safe`, or `decision` |
+| `policy.downgradeConfidence` | `0.75` | Top-two gap the judge needs to lower a tier. 0.75 is strict; ~0.3 lets it act. |
+| `policy.onJudgeUnavailable` | `hold` | `hold` keeps the current route when the judge is silent; `heuristic` lets the local rule decide. |
 | `policy.allowDowngrade` | `true` | Permit switching to a cheaper tier |
 | `notices` | `true` | Append the durable route notice |
 | `debug` | `false` | Log every decision |

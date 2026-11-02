@@ -85,16 +85,41 @@ const DEFAULT_CONFIG = {
     maxTier: 'deep',
     /** Per-subagent ceiling; defaults to maxTier. */
     subagentMaxTier: '',
+    /**
+     * What to do when the decision model is asked but does not answer.
+     * hold:      keep the route the session is already on (default). A failed
+     *            forecast is not evidence that the task is easy, so the tier is
+     *            not lowered on the strength of a missing answer.
+     * heuristic: let the local rule decide, which keeps the cost saving but can
+     *            downgrade a hard turn while the judge is unavailable.
+     */
+    onJudgeUnavailable: 'hold',
     allowDowngrade: true,
     allowUpgrade: true,
     /**
      * max:      final tier = max(heuristic, decision). The decision model can
      *           only raise the tier, which is the quality-safest mode.
-     * safe:     the decision model may lower the tier when its confidence is
-     *           high and no risk signal fired.
+     * safe:     the decision model may lower the tier when the separation
+     *           between its first and second choice is above the threshold and
+     *           no risk signal fired.
      * decision: the decision model decides; heuristics are only a fallback.
      */
     decisionTrust: 'max',
+    /**
+     * The separation the judge needs before it may lower the tier, measured as
+     * the gap between its first and second choice (0 = a tie, 1 = certain).
+     *
+     * This is NOT the judge's own `confidence` field, which does not track the
+     * probabilities it reports (one turn returned probabilities 0.59/0.32/0.09
+     * with `confidence` 0.39, another 0.41/0.29/0.29 with 0.12). The gap is
+     * computed from the distribution, so it means the same thing every turn.
+     *
+     * 0.75 is deliberately strict: with three tiers it asks the winner to lead
+     * by three quarters of the probability mass, which the observed answers
+     * (typically 0.12–0.94) often do not reach, so downgrades stay rare. The
+     * panel shows the observed range next to this setting; lower it to ~0.3 to
+     * let the judge actually move a turn down a tier.
+     */
     downgradeConfidence: 0.75,
     main: true,
     subagents: true,
@@ -711,11 +736,26 @@ export function apply(ctx, rawConfig = {}) {
             tier: decisionModel.tier,
             effort: decisionModel.effort ?? null,
             confidence: decisionModel.confidence ?? null,
+            confidenceMargin: decisionModel.confidenceMargin ?? null,
+            reportedConfidence: decisionModel.reportedConfidence ?? null,
             probabilities: decisionModel.probabilities ?? null,
             latencyMs: decisionModel.latencyMs ?? null,
             raw: decisionModel.raw ?? null,
           }
           rationale = `the decision model chose ${decisionModel.tier}${decisionModel.confidence === null ? '' : ` with ${decisionModel.confidence.toFixed(2)} confidence`}`
+        } else {
+          // The judge was asked and did not answer. A failed forecast is not
+          // evidence that the task is easy, so by default the route is held
+          // rather than handed to the keyword rule, which would quietly
+          // downgrade exactly when the second opinion went missing.
+          if (config.policy.onJudgeUnavailable === 'hold') {
+            tier = st.active?.tier ?? originTier
+            source = 'judge-unavailable'
+            rationale = 'the decision model did not answer; the route was held'
+          } else {
+            source = 'judge-unavailable'
+            rationale = 'the decision model did not answer; the local rule decided'
+          }
         }
       }
     }
@@ -745,6 +785,8 @@ export function apply(ctx, rawConfig = {}) {
       decisionTier: verdict?.tier ?? null,
       decisionEffort: verdict?.effort ?? null,
       confidence: verdict?.confidence ?? null,
+      confidenceMargin: verdict?.confidenceMargin ?? null,
+      reportedConfidence: verdict?.reportedConfidence ?? null,
       probabilities: verdict?.probabilities ?? null,
       decisionLatencyMs: verdict?.latencyMs ?? null,
       decisionVerdict: verdict?.raw ?? null,
@@ -1139,6 +1181,10 @@ export function apply(ctx, rawConfig = {}) {
         // How long the judge took to answer, in milliseconds.
         latencyMs: Date.now() - startedAt,
         confidence: confidenceOf(tierAnswer),
+        confidenceMargin: marginOf(tierAnswer),
+        reportedConfidence: typeof tierAnswer?.confidence === 'number'
+          ? clamp01(tierAnswer.confidence)
+          : null,
         probabilities: tierAnswer?.probabilities ?? null,
         // The verbatim answer, kept small: the records tab shows it so the
         // judgement can be read without guessing what the model said.
@@ -1176,7 +1222,10 @@ export function apply(ctx, rawConfig = {}) {
         baseline_model: meta.origin?.model,
         baseline_tier: meta.origin?.tier,
         active_tier: meta.active?.tier,
-        heuristic_tier: meta.tier,
+        // The local rule's guess is deliberately NOT sent. A judge that is told
+        // what the cheap rule already concluded tends to agree with it, which
+        // makes asking a second opinion pointless. Only facts travel: what the
+        // task costs to carry, and where the request started from.
         estimated_tokens: meta.tokens,
         candidates: config.candidates.map((candidate) => `${candidate.tier}:${candidate.label}`),
       },
@@ -1263,14 +1312,34 @@ export function apply(ctx, rawConfig = {}) {
     }
   }
 
-  function confidenceOf(answer) {
+  /**
+   * How clearly the judge's first choice beat its second.
+   *
+   * The judge also reports a `confidence`, but that number is its own opinion
+   * and it does not track the probabilities it returns alongside (a turn with
+   * probabilities 0.59/0.32/0.09 reported 0.39, while one with 0.41/0.29/0.29
+   * reported 0.12). The margin is computed from the reported distribution, so
+   * it means the same thing on every turn, and a threshold on it can be
+   * calibrated by reading the records.
+   *
+   * @param answer one answer from the judge.
+   * @returns the top-two separation in [0,1], or null when there is none.
+   */
+  function marginOf(answer) {
     if (!answer) return null
-    if (typeof answer.confidence === 'number') return clamp01(answer.confidence)
     const probabilities = answer.probabilities
     if (!probabilities || typeof probabilities !== 'object') return null
     const values = Object.values(probabilities).filter((v) => typeof v === 'number').sort((a, b) => b - a)
     if (values.length < 2) return null
     return clamp01(values[0] - values[1])
+  }
+
+  function confidenceOf(answer) {
+    if (!answer) return null
+    const margin = marginOf(answer)
+    if (margin !== null) return margin
+    if (typeof answer.confidence === 'number') return clamp01(answer.confidence)
+    return null
   }
 
   function buildTaskContent(agent, messages, st) {
@@ -1294,6 +1363,36 @@ export function apply(ctx, rawConfig = {}) {
     return parts.join('\n\n')
   }
 
+  /**
+   * What the judge's separation actually looks like in this session.
+   *
+   * `downgradeConfidence` is compared against the top-two margin, and that
+   * margin is not on the scale people assume: three tiers make 0.75 a demand
+   * that the winner lead by three quarters of the probability mass. Publishing
+   * the observed range lets the threshold be set from evidence instead of a
+   * guess, which is the one thing the routing literature agrees on.
+   *
+   * @returns percentiles of the observed margins, or null before any judgement.
+   */
+  function marginStats() {
+    const values = recent
+      .map((entry) => entry.confidenceMargin)
+      .filter((value) => typeof value === 'number')
+      .sort((a, b) => a - b)
+    if (values.length === 0) return null
+    const at = (quantile) => values[Math.min(values.length - 1, Math.floor(quantile * values.length))]
+    const threshold = config.policy.downgradeConfidence
+    return {
+      samples: values.length,
+      min: values[0],
+      p50: at(0.5),
+      p90: at(0.9),
+      max: values[values.length - 1],
+      threshold,
+      passing: values.filter((value) => value >= threshold).length,
+    }
+  }
+
   function record(agent, st, decision, turn, step) {
     const entry = {
       at: new Date().toISOString(),
@@ -1312,10 +1411,21 @@ export function apply(ctx, rawConfig = {}) {
       decisionTier: decision.decisionTier ?? null,
       decisionEffort: decision.decisionEffort ?? null,
       confidence: decision.confidence ?? null,
+      confidenceMargin: decision.confidenceMargin ?? null,
+      reportedConfidence: decision.reportedConfidence ?? null,
       probabilities: decision.probabilities ?? null,
       decisionLatencyMs: decision.decisionLatencyMs ?? null,
       heuristicTier: decision.heuristic?.tier ?? null,
       heuristicScore: decision.heuristic?.score ?? null,
+      // What the keyword rule actually saw, so its part in a decision can be
+      // audited instead of guessed at.
+      heuristicHits: decision.heuristic?.deepHits?.length || decision.heuristic?.mediumHits?.length || decision.heuristic?.fastHits?.length
+        ? {
+          deep: decision.heuristic?.deepHits ?? [],
+          medium: decision.heuristic?.mediumHits ?? [],
+          fast: decision.heuristic?.fastHits ?? [],
+        }
+        : null,
       decisionVerdict: decision.decisionVerdict ?? null,
     }
     recent.push(entry)
@@ -1377,6 +1487,7 @@ export function apply(ctx, rawConfig = {}) {
         subagents: config.policy.subagents,
         decisionTrust: config.policy.decisionTrust,
         downgradeConfidence: config.policy.downgradeConfidence,
+        onJudgeUnavailable: config.policy.onJudgeUnavailable,
         qualityFloor: config.policy.qualityFloor,
         maxTier: config.policy.maxTier,
         maxFastSteps: config.policy.maxFastSteps,
@@ -1508,6 +1619,8 @@ export function apply(ctx, rawConfig = {}) {
         failures: circuitFor(config.decision.activeId).failures,
       },
       policy: config.policy,
+      // How much separation the judge's answers actually show.
+      confidenceStats: marginStats(),
       // The judgement criteria every profile shares until it is given its own.
       // The panel shows these, so a new decision model needs no typing.
       defaultDecisionQuestions: DEFAULT_QUESTIONS,
@@ -1981,6 +2094,12 @@ function normalizeConfig(rawConfig) {
   normalizePolicyTiers(merged.policy)
   if (['max', 'safe', 'decision'].includes(merged.policy.decisionTrust) === false) {
     merged.policy.decisionTrust = 'max'
+  }
+  // A profile layer replaces `policy` wholesale, so a value added after that
+  // layer was written never reaches the default. Fill it in here instead of
+  // relying on the bundle's default object.
+  if (['hold', 'heuristic'].includes(merged.policy.onJudgeUnavailable) === false) {
+    merged.policy.onJudgeUnavailable = 'hold'
   }
   merged.candidates = (Array.isArray(merged.candidates) ? merged.candidates : [])
     .map((candidate, index) => {

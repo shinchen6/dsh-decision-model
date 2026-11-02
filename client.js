@@ -62,7 +62,6 @@ window.__ModuleLoader__.load({
       dmBuiltins: 'Quick setups',
       dmName: 'name',
       dmNamePlaceholder: 'for example jev',
-      dmNone: 'none configured',
       decisionActiveHint: 'The decision model in use right now.',
       endpoint: 'Endpoint',
       decisionModel: 'Model',
@@ -85,6 +84,11 @@ window.__ModuleLoader__.load({
       trustSafe: 'Allow it to downgrade',
       trustDecision: 'Follow it exactly',
       trustMaxHint: 'It may only pick a stronger model, never a cheaper one.',
+      judgeSaid: 'the judge itself said',
+      ruleSaw: 'the local rule saw',
+      observedMargin: 'observed separation p50/p90',
+      passingThreshold: 'above the threshold',
+      thresholdIs: 'threshold',
       trustSafeHint: 'It may pick a cheaper model when it is confident.',
       trustDecisionHint: 'Its answer is used as-is.',
       configure: 'Configure',
@@ -187,7 +191,6 @@ window.__ModuleLoader__.load({
       dmBuiltins: '快速配置',
       dmName: '名称',
       dmNamePlaceholder: '例如 jev',
-      dmNone: '尚未配置',
       decisionActiveHint: '当前使用的决策模型。',
       endpoint: '接口地址',
       decisionModel: '模型',
@@ -210,6 +213,11 @@ window.__ModuleLoader__.load({
       trustSafe: '允许降档',
       trustDecision: '完全照办',
       trustMaxHint: '只允许换更强的模型，不允许换更便宜的。',
+      judgeSaid: '模型自报',
+      ruleSaw: '本地规则命中',
+      observedMargin: '实测区分度 p50/p90',
+      passingThreshold: '超过阈值',
+      thresholdIs: '阈值',
       trustSafeHint: '它有把握时，可以换更便宜的模型。',
       trustDecisionHint: '完全按它的结果执行。',
       configure: '配置',
@@ -1213,11 +1221,22 @@ html[data-model-router-routing] [data-slot="conversation.input.model"]{display:n
             ['max', t('trustMax')],
             ['safe', t('trustSafe')],
             ['decision', t('trustDecision')],
-          ], (value) => postConfig({ policy: { decisionTrust: value } }), {
-            max: t('trustMaxHint'),
-            safe: t('trustSafeHint'),
-            decision: t('trustDecisionHint'),
-          }[(cfg?.policy?.decisionTrust ?? 'max')]),
+          ], (value) => postConfig({ policy: { decisionTrust: value } }), [
+            {
+              max: t('trustMaxHint'),
+              safe: t('trustSafeHint'),
+              decision: t('trustDecisionHint'),
+            }[(cfg?.policy?.decisionTrust ?? 'max')],
+            // The threshold is compared against the judge's top-two margin,
+            // whose range is not obvious without seeing it.
+            status?.confidenceStats
+              ? [
+                `${t('observedMargin')} ${status.confidenceStats.p50.toFixed(2)} / ${status.confidenceStats.p90.toFixed(2)}`,
+                `${t('passingThreshold')} ${status.confidenceStats.passing}/${status.confidenceStats.samples}`,
+                `${t('thresholdIs')} ${status.confidenceStats.threshold.toFixed(2)}`,
+              ].join(' · ')
+              : null,
+          ].filter(Boolean).join('\n')),
         ]) : null,
 
 
@@ -1274,6 +1293,10 @@ html[data-model-router-routing] [data-slot="conversation.input.model"]{display:n
                       ? [
                         tierName(entry.decisionTier),
                         typeof entry.confidence === 'number' ? `${t('confidence')} ${entry.confidence.toFixed(2)}` : null,
+                        typeof entry.reportedConfidence === 'number' && typeof entry.confidenceMargin === 'number'
+                          && Math.abs(entry.reportedConfidence - entry.confidenceMargin) >= 0.02
+                          ? `${t('judgeSaid')} ${entry.reportedConfidence.toFixed(2)}`
+                          : null,
                         entry.decisionEffort ? `${t('effort')} ${effortLabel(entry.decisionEffort)}` : null,
                       ].filter(Boolean).join(' · ')
                       : t('notConsulted')),
@@ -1284,6 +1307,14 @@ html[data-model-router-routing] [data-slot="conversation.input.model"]{display:n
                         key,
                         className: 'mr-prob-item',
                       }, `${key} ${typeof value === 'number' ? value.toFixed(2) : value}`)))
+                    : null,
+                  entry.heuristicHits
+                    ? detail(t('ruleSaw'), [
+                      entry.heuristicHits.deep?.length ? `deep: ${entry.heuristicHits.deep.join(', ')}` : null,
+                      entry.heuristicHits.medium?.length ? `balanced: ${entry.heuristicHits.medium.join(', ')}` : null,
+                      entry.heuristicHits.fast?.length ? `fast: ${entry.heuristicHits.fast.join(', ')}` : null,
+                      typeof entry.heuristicScore === 'number' ? `score ${entry.heuristicScore}` : null,
+                    ].filter(Boolean).join(' · '))
                     : null,
                   detail(t('provider'), entry.provider),
                   detail(t('model'), entry.model),

@@ -25,6 +25,13 @@ goes to a strong deep one.
 The judge is asked **once per turn**. The rest of the turn keeps that answer, so
 a turn with many tool calls does not ask again.
 
+The local rule that backs the judge up is deliberately narrow: it supplies the
+facts a judge cannot see and escalates on unambiguous failure, but it does not
+downgrade a turn on keywords when the judge is unavailable. When the judge does
+not answer, the route is held rather than quietly made cheaper. See
+[the design notes](docs/DESIGN.md#why-the-local-rule-is-shaped-the-way-it-is)
+for the published evidence behind that choice.
+
 ## Install
 
 Clone the repository, then add the directory to your profile as a bundle:
